@@ -39,6 +39,8 @@ docker compose up -d --build
 `docker compose` 会拉起三件套：网关（MySQL 存储 + Redis 缓存）、MySQL 8、Redis 7，
 随后访问 `http://localhost:8787/` 即可。表结构在首启时自动迁移。
 
+> 端口说明：默认只有网关的 `8787` 对外暴露。MySQL / Redis 仅在 compose 内部网络互联（容器间用服务名 `mysql` / `redis` 访问），**不会**占用宿主机的 3306 / 6379，因此和你本机已运行的 MySQL / Redis 不冲突。若需从宿主机直接连进去调试，在对应服务下加一段 `ports:` 映射即可（例如 `"3307:3306"` 或 `"6380:6379"`）。
+
 ### 存储后端（SQLite / MySQL）
 
 - 由 `DB_DRIVER` 切换：`sqlite`（默认，零配置，文件在 `DATABASE_PATH`）或 `mysql`。

@@ -46,8 +46,12 @@ services:
     command: --default-authentication-plugin=mysql_native_password --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
     volumes:
       - mysql_data:/var/lib/mysql
-    ports:
-      - "${DB_EXPOSE_PORT:-3306}:3306"
+    # No host port published by default: the app reaches MySQL over the
+    # internal Compose network (mysql:3306), so there is no need to bind 3306
+    # on the host (which clashes with a local MySQL). To connect from the host
+    # for debugging, add a `ports:` mapping (e.g. "3307:3306").
+    expose:
+      - "3306"
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-p${DB_ROOT_PASSWORD:-root_pw}"]
       interval: 5s
@@ -60,8 +64,12 @@ services:
     command: redis-server --save 60 1 --loglevel warning
     volumes:
       - redis_data:/data
-    ports:
-      - "${REDIS_EXPOSE_PORT:-6379}:6379"
+    # No host port published by default: the app reaches Redis over the
+    # internal Compose network (redis://redis:6379), so there is no need to
+    # bind 6379 on the host (which clashes with a local Redis). To connect from
+    # the host for debugging, add a `ports:` mapping (e.g. "6380:6379").
+    expose:
+      - "6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
