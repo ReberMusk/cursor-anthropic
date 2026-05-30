@@ -8,34 +8,32 @@ export const CURSOR = {
 
 // Resolve the model name to send to Cursor. Override entirely with CURSOR_MODEL.
 //
-// IMPORTANT: do NOT clobber explicit Cursor model ids. A request for
-// `claude-opus-4-8` must reach Cursor as `claude-opus-4-8` — mapping it to a
-// family alias like `claude-4-opus` sends the wrong/older model and breaks it.
-// So we PASS THROUGH the requested model unchanged, and only fold the classic
-// GENERIC Anthropic aliases (a bare family word, or a dated / `-latest` id that
-// Cursor doesn't recognize) onto Cursor's canonical family names.
+// Cursor model ids are `claude-<version>-<family>` (e.g. claude-4-sonnet,
+// claude-4-opus). We fold any incoming model containing a known family word onto
+// the canonical Cursor id — this is necessary because Anthropic-style ids
+// (claude-3-5-sonnet-20241022) and made-up ids (claude-opus-4-8) are rejected by
+// Cursor as "AI Model Not Found".
 //
-// A trailing `-max` requests "Max mode". On the wire that is NOT a name suffix:
-// `encodeModel` strips `-max` and sets the dedicated ModelDetails.max_mode
-// boolean (field 8). We keep the `-max` here so it survives down to encodeModel.
+// "Max mode": on the wire it is NOT a name suffix — `encodeModel` strips a
+// trailing `-max` and sets the dedicated ModelDetails.max_mode flag (field 8).
+// We keep `-max` here so it survives down to encodeModel. Opus on Cursor REQUIRES
+// Max mode (otherwise: "Max Mode Required"), so we force it for opus.
 export function mapModel(anthropicModel) {
   if (process.env.CURSOR_MODEL) return process.env.CURSOR_MODEL;
   const raw = String(anthropicModel || "").trim();
   if (!raw) return "claude-4-sonnet";
 
-  const maxSuffix = /[-_\s]max$/i.test(raw) ? "-max" : "";
-  const core = maxSuffix ? raw.replace(/[-_\s]max$/i, "") : raw;
-  const c = core.toLowerCase();
+  const explicitMax = /[-_\s]max$/i.test(raw);
+  const c = raw.toLowerCase();
 
-  // Only remap "generic" Anthropic ids: a bare family word, or an id ending in a
-  // date (-YYYYMMDD) or -latest. Specific Cursor ids (e.g. claude-opus-4-8) and
-  // everything else pass through untouched.
-  const generic = /-(\d{8}|latest)$/i.test(c) || /^(claude-)?(3[-.]5-)?(haiku|sonnet|opus)$/i.test(c);
-  let mapped = core;
-  if (generic) {
-    if (c.includes("haiku")) mapped = "claude-3.5-haiku";
-    else if (c.includes("opus")) mapped = "claude-4-opus";
-    else if (c.includes("sonnet")) mapped = "claude-4-sonnet";
-  }
-  return mapped + maxSuffix;
+  // Canonical, currently-valid Cursor ids (verified live against the API).
+  let base;
+  let forceMax = false;
+  if (c.includes("haiku")) base = "claude-4.5-haiku";
+  else if (c.includes("opus")) { base = "claude-4.1-opus"; forceMax = true; } // opus requires Max
+  else if (c.includes("sonnet")) base = "claude-4.5-sonnet";
+  // Unknown family — pass through (drop a trailing -max; re-added below if asked).
+  else base = raw.replace(/[-_\s]max$/i, "") || "claude-4.5-sonnet";
+
+  return (explicitMax || forceMax) ? `${base}-max` : base;
 }
