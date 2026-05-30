@@ -212,14 +212,18 @@ export const SCHED_DEFAULTS = {
  * leaving the list empty falls back to these defaults.
  */
 export const DEFAULT_ACCOUNT_ERROR_KEYWORDS = [
-  "Free users can only use GPT 4.1 or Auto as premium model",
-  "Your request has been blocked as our system has detected suspicious activity from your account",
+  "limited",
+  "unpaid",
+  "You're out of usage",
+  "out of usage",
+  "usage limit",
+  "suspicious activity",
   "blocked",
-  "Click Continue to increase",
   "pay your invoice",
   "slow pool",
-  "Please switch to auto or Auto",
-  "You're out of usage",
+  "Free users can only use",
+  "Please switch to auto",
+  "Click Continue to increase",
 ];
 
 export const GATEWAY_DEFAULTS = {

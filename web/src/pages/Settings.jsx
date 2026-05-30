@@ -108,7 +108,7 @@ export default function Settings({ onPasswordChanged }) {
 
         <AreaField
           label="账号级异常的报错关键词（支持关键字匹配）"
-          description="一行一个报错提示，自行去后台日志抓取。命中的报错会被标记为账号级异常（冷却该账号并切换到下一个）；未命中的（如参数错误 Max Mode Required）不会禁用账号，直接把错误返回给客户端。注意：HTTP 401/403/429 始终视为账号级。留空则使用程序内置默认列表。"
+          description="一行一个报错提示，自行去后台日志抓取（大小写不敏感、子串匹配）。命中的报错会被标记为账号级异常（冷却该账号并切换到下一个）；未命中的（如参数错误 Max Mode Required）不会禁用账号，直接以 400 返回给客户端。HTTP 401（鉴权失败）/429（限速）始终视为账号级；403 交由关键词判断。留空则使用程序内置默认列表（limited、unpaid、out of usage、suspicious activity 等）。"
           minRows={8}
           value={(gateway.accountErrorKeywords || []).join("\n")}
           onValueChange={(v) => setGateway((g) => ({ ...g, accountErrorKeywords: v.split(/\r?\n/) }))}
