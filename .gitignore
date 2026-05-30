@@ -1,0 +1,7 @@
+.env
+node_modules/
+*.log
+data/
+.npm-cache/
+web/node_modules/
+web/dist/

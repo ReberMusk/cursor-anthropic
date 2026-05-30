@@ -1,0 +1,73 @@
+# One-command stack: gateway + MySQL + Redis.
+#
+#   cp .env.example .env   # then edit secrets
+#   docker compose up -d --build
+#
+# The gateway listens on http://localhost:8787 (admin UI + Anthropic API).
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "${PORT:-8787}:8787"
+    environment:
+      PORT: 8787
+      NODE_ENV: production
+      # storage: MySQL (Redis-accelerated)
+      DB_DRIVER: mysql
+      DB_HOST: mysql
+      DB_PORT: "3306"
+      DB_USER: ${DB_USER:-cursor}
+      DB_PASSWORD: ${DB_PASSWORD:-cursor_pw}
+      DB_NAME: ${DB_NAME:-cursor_anthropic}
+      REDIS_URL: redis://redis:6379
+      # initial admin (printed once on first boot if password omitted)
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+      JWT_SECRET: ${JWT_SECRET:-}
+      # default upstream model + optional global proxy
+      CURSOR_MODEL: ${CURSOR_MODEL:-claude-4-sonnet}
+      ALL_PROXY: ${ALL_PROXY:-}
+      GATEWAY_API_KEY: ${GATEWAY_API_KEY:-}
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  mysql:
+    image: mysql:8.0
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: ${DB_NAME:-cursor_anthropic}
+      MYSQL_USER: ${DB_USER:-cursor}
+      MYSQL_PASSWORD: ${DB_PASSWORD:-cursor_pw}
+      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:-root_pw}
+    command: --default-authentication-plugin=mysql_native_password --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+    volumes:
+      - mysql_data:/var/lib/mysql
+    ports:
+      - "${DB_EXPOSE_PORT:-3306}:3306"
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-p${DB_ROOT_PASSWORD:-root_pw}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: redis-server --save 60 1 --loglevel warning
+    volumes:
+      - redis_data:/data
+    ports:
+      - "${REDIS_EXPOSE_PORT:-6379}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+volumes:
+  mysql_data:
+  redis_data:
