@@ -4,10 +4,16 @@
  * Also parses the various bulk-import formats.
  */
 import { accounts } from "../db/repos.js";
-import { parseCursorToken } from "./jwt.js";
+import { parseCursorToken, extractAccessToken } from "./jwt.js";
 import { resolveMachineId, generateCursorIds, looksLikeMachineId } from "./machineId.js";
 
-const cleanTok = (t) => (String(t || "").includes("::") ? String(t).split("::")[1] : String(t || "")).trim();
+const cleanTok = extractAccessToken;
+const isEmail = (s) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(s || "").trim());
+/** A field that looks like a Cursor access token (a JWT, optionally "user_x::jwt"). */
+const isTokenField = (s) => {
+  const t = extractAccessToken(s);
+  return t.length >= 50 && /^ey/.test(t) && t.split(".").length >= 2;
+};
 
 /** Validate + normalize a single account record for import. Throws on invalid. */
 export function buildAccountRecord(input) {
@@ -33,8 +39,8 @@ export function buildAccountRecord(input) {
   const expiresAt = claims.expiresAt || new Date(Date.now() + 24 * 3600 * 1000).toISOString();
 
   return {
-    name: input.name || claims.email || claims.userId || null,
-    email: claims.email || null,
+    name: input.name || claims.email || input.email || claims.userId || null,
+    email: claims.email || input.email || null,
     user_id: claims.userId || null,
     access_token: token,
     machine_id: machineId,
@@ -86,7 +92,15 @@ export async function importAccount(input) {
 /**
  * Parse bulk-import payloads. Accepts:
  *  - a JSON array of objects
- *  - newline text: `token----machineId`, `token,machineId`, or just `token`
+ *  - newline text, each line a record split by `----` (preferred), tab, or comma.
+ *
+ * Fields are detected by SHAPE, not position, so common Cursor dumps just work:
+ *   email----password----password----user_xxx%3A%3AeyJ...   (token last, url-encoded)
+ *   eyJ...token----<machineId>
+ *   eyJ...token
+ * The token is the field that looks like a JWT (optionally `user_x::jwt`); an
+ * email and a 64-hex machineId are picked up from the remaining fields if present.
+ * machineId is never required — it is derived from the token when absent.
  * Returns an array of raw input objects to feed importAccount.
  */
 export function parseBulk(payload) {
@@ -110,11 +124,25 @@ export function parseBulk(payload) {
   for (const line of trimmed.split(/\r?\n/)) {
     const l = line.trim();
     if (!l || l.startsWith("#")) continue;
-    let token = l, machineId = null;
-    if (l.includes("----")) [token, machineId] = l.split("----");
-    else if (l.includes(",")) [token, machineId] = l.split(",");
-    else if (/\s+/.test(l) && l.split(/\s+/).length === 2) [token, machineId] = l.split(/\s+/);
-    out.push({ accessToken: token.trim(), machineId: machineId ? machineId.trim() : undefined });
+
+    let parts;
+    if (l.includes("----")) parts = l.split("----");
+    else if (l.includes("\t")) parts = l.split("\t");
+    else if (l.includes(",")) parts = l.split(",");
+    else parts = l.split(/\s+/);
+    parts = parts.map((p) => p.trim()).filter(Boolean);
+    if (!parts.length) continue;
+
+    // The token is the JWT-looking field; if none matches, fall back to the
+    // longest field (best effort) so a lone bare token still imports.
+    let token = parts.find(isTokenField);
+    if (!token) token = parts.slice().sort((a, b) => b.length - a.length)[0];
+    if (!token) continue;
+
+    const rest = parts.filter((p) => p !== token);
+    const email = rest.find(isEmail) || undefined;
+    const machineId = rest.find((p) => looksLikeMachineId(p)) || undefined;
+    out.push({ accessToken: token, email, machineId });
   }
   return out;
 }

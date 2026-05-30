@@ -1,11 +1,29 @@
 import { useEffect, useState } from "react";
 import {
   Table, TableHeader, TableColumn, TableBody, TableRow, TableCell,
-  Button, Chip, Spinner, Snippet, useDisclosure, Modal, ModalContent,
+  Button, Chip, Spinner, useDisclosure, Modal, ModalContent,
   ModalHeader, ModalBody, ModalFooter,
 } from "@heroui/react";
 import { listKeys, createKey, activateKey, deactivateKey, deleteKey } from "../lib/api.js";
 import { PageHeader, TextField } from "../components/ui.jsx";
+import { copyText } from "../lib/clipboard.js";
+
+function CopyField({ value }) {
+  const [copied, setCopied] = useState(false);
+  const onCopy = async () => {
+    const ok = await copyText(value);
+    setCopied(ok);
+    if (ok) setTimeout(() => setCopied(false), 1500);
+  };
+  return (
+    <div className="flex items-center gap-2 rounded-medium border border-default-200 bg-default-100 p-2">
+      <code className="flex-1 break-all font-mono text-tiny select-all">{value}</code>
+      <Button size="sm" variant="flat" color={copied ? "success" : "primary"} onPress={onCopy} className="shrink-0">
+        {copied ? "已复制" : "复制"}
+      </Button>
+    </div>
+  );
+}
 
 export default function Keys() {
   const [keys, setKeys] = useState(null);
@@ -101,7 +119,7 @@ function CreateModal({ disclosure, onDone }) {
               ) : (
                 <div className="space-y-2">
                   <div className="text-small text-warning">⚠ 该密钥只显示这一次，请立即保存：</div>
-                  <Snippet symbol="" variant="flat" className="w-full">{created}</Snippet>
+                  <CopyField value={created} />
                 </div>
               )}
             </ModalBody>

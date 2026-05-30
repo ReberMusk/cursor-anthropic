@@ -183,9 +183,9 @@ function ImportModal({ disclosure, onDone }) {
                   <div className="space-y-2 pt-2">
                     <AreaField
                       label="批量导入"
-                      description="每行一个：token，或 token----machineId / token,machineId；也支持粘贴 JSON 数组"
+                      description="每行一个账号，字段用 ---- 分隔，顺序随意：会自动识别 token（JWT，支持 user_xxx::token 或 URL 编码的 %3A%3A）、邮箱、machineId。machineId 留空将从 token 自动派生，无需填写。也支持粘贴 JSON 数组。"
                       minRows={8} value={bulk} onValueChange={setBulk}
-                      placeholder={"ey...token1\ney...token2----<machineId>\n[{\"accessToken\":\"ey...\",\"name\":\"a\"}]"}
+                      placeholder={"email----password----password----user_xxx%3A%3AeyJ...token\ney...token2\n[{\"accessToken\":\"ey...\",\"name\":\"a\"}]"}
                     />
                   </div>
                 </Tab>

@@ -8,6 +8,22 @@
  * with payload claims: { sub: "auth0|user_...", time, randomness, exp, iss, ... }
  */
 
+/**
+ * Normalize a raw token string into just the JWT.
+ * Cursor dumps often prefix the JWT with the user id and a URL-encoded "::"
+ * separator, e.g. "user_01J...%3A%3AeyJhbGci..." (decodes to "user_...::eyJ...").
+ * We URL-decode when needed and keep only the part after "::".
+ */
+export function extractAccessToken(raw) {
+  let s = String(raw || "").trim();
+  if (!s) return "";
+  if (/%[0-9a-fA-F]{2}/.test(s)) {
+    try { s = decodeURIComponent(s); } catch { /* keep the raw value */ }
+  }
+  if (s.includes("::")) s = s.split("::").pop();
+  return s.trim();
+}
+
 function b64urlToJson(part) {
   try {
     const b64 = part.replace(/-/g, "+").replace(/_/g, "/");
@@ -25,7 +41,7 @@ function b64urlToJson(part) {
  *            raw:object|null }}
  */
 export function parseCursorToken(token) {
-  const clean = String(token || "").includes("::") ? String(token).split("::")[1] : String(token || "");
+  const clean = extractAccessToken(token);
   const parts = clean.split(".");
   const empty = { userId: null, sub: null, email: null, iss: null, expSeconds: null, expiresAt: null, raw: null };
   if (parts.length < 2) return empty;
