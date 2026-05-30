@@ -1,5 +1,8 @@
 // Thin fetch wrapper for the admin REST API. Cookies carry the admin session.
 
+// Broadcast when the session is no longer valid so the app can drop to /login.
+export const UNAUTHORIZED_EVENT = "api:unauthorized";
+
 async function request(method, path, body) {
   const opts = { method, headers: {}, credentials: "same-origin" };
   if (body !== undefined) {
@@ -11,6 +14,10 @@ async function request(method, path, body) {
   let data = null;
   try { data = text ? JSON.parse(text) : null; } catch { data = { raw: text }; }
   if (!res.ok) {
+    // A 401 on any non-auth endpoint means the session expired: notify the app.
+    if (res.status === 401 && !path.startsWith("/api/auth/")) {
+      window.dispatchEvent(new CustomEvent(UNAUTHORIZED_EVENT));
+    }
     const msg = data?.error?.message || data?.error || data?.raw || res.statusText;
     const err = new Error(typeof msg === "string" ? msg : JSON.stringify(msg));
     err.status = res.status;

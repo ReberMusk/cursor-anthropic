@@ -33,7 +33,7 @@ const FIELD = {
   CV2C_TOOL: 1, CV2C_MCP_PARAMS: 27, CV2C_CALL_ID: 3, CV2C_NAME: 9, CV2C_RAW_ARGS: 10,
   CV2C_TOOL_INDEX: 48, CV2C_MODEL_CALL_ID: 49,
 
-  MODEL_NAME: 1, MODEL_EMPTY: 4,
+  MODEL_NAME: 1, MODEL_AZURE_STATE: 4, MODEL_ENABLE_SLOW_POOL: 5, MODEL_MAX_MODE: 8,
   INSTRUCTION_TEXT: 1,
   SETTING_PATH: 1, SETTING_UNKNOWN_3: 3, SETTING_UNKNOWN_6: 6, SETTING_UNKNOWN_8: 8, SETTING_UNKNOWN_9: 9,
   SETTING6_FIELD_1: 1, SETTING6_FIELD_2: 2,
@@ -187,10 +187,17 @@ export function encodeInstruction(text) {
   return text ? encodeField(FIELD.INSTRUCTION_TEXT, WIRE_TYPE.LEN, text) : new Uint8Array(0);
 }
 
+// Encode the ModelDetails message (request field 5). Cursor enables Max Mode
+// NOT via a name suffix but via the dedicated `max_mode` boolean (field 8); the
+// model_name itself must be the BASE id WITHOUT the `-max` suffix — exactly what
+// the editor sends. Sending `claude-4-opus-max` with no flag → "Max Mode Required".
 export function encodeModel(modelName) {
+  const wantsMax = /[-_\s]max$/i.test(modelName);
+  const baseName = wantsMax ? modelName.replace(/[-_\s]max$/i, "") : modelName;
   return concatArrays(
-    encodeField(FIELD.MODEL_NAME, WIRE_TYPE.LEN, modelName),
-    encodeField(FIELD.MODEL_EMPTY, WIRE_TYPE.LEN, new Uint8Array(0))
+    encodeField(FIELD.MODEL_NAME, WIRE_TYPE.LEN, baseName),
+    encodeField(FIELD.MODEL_AZURE_STATE, WIRE_TYPE.LEN, new Uint8Array(0)), // empty AzureState message
+    ...(wantsMax ? [encodeField(FIELD.MODEL_MAX_MODE, WIRE_TYPE.VARINT, 1)] : [])
   );
 }
 

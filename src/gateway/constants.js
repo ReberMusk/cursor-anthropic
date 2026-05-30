@@ -9,10 +9,12 @@ export const CURSOR = {
 // Map an incoming Anthropic model id to a model name your Cursor account supports.
 // Override entirely with CURSOR_MODEL env, or extend this map.
 //
-// Cursor enables "Max mode" via a `-max` suffix on the model name (exactly like
-// the editor). We must PRESERVE that suffix — otherwise models that require Max
-// reply with "Max Mode Required". So a request for `claude-4-sonnet-max` maps to
-// the canonical Cursor model + `-max`.
+// A trailing `-max` requests Cursor "Max mode". We PRESERVE that marker on the
+// mapped name here; the protobuf layer (encodeModel) is what actually turns it
+// into Cursor's real signal: it strips the suffix and sets the dedicated
+// ModelDetails.max_mode boolean (field 8). Sending the `-max` name alone (no
+// flag) makes Cursor reply "Max Mode Required". So `claude-4-sonnet-max` maps to
+// the canonical Cursor model + `-max`, which becomes `claude-4-sonnet` + max_mode.
 export function mapModel(anthropicModel) {
   if (process.env.CURSOR_MODEL) return process.env.CURSOR_MODEL;
   const raw = String(anthropicModel || "").trim();

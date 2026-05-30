@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Routes, Route, Navigate, useLocation } from "react-router-dom";
 import { Spinner } from "@heroui/react";
-import { me } from "./lib/api.js";
+import { me, UNAUTHORIZED_EVENT } from "./lib/api.js";
 import Layout from "./components/Layout.jsx";
 import Login from "./pages/Login.jsx";
 import Dashboard from "./pages/Dashboard.jsx";
@@ -20,6 +20,12 @@ export default function App() {
       .catch(() => setAuth({ loading: false, user: null }));
 
   useEffect(() => { refresh(); }, []);
+
+  useEffect(() => {
+    const onUnauthorized = () => setAuth({ loading: false, user: null });
+    window.addEventListener(UNAUTHORIZED_EVENT, onUnauthorized);
+    return () => window.removeEventListener(UNAUTHORIZED_EVENT, onUnauthorized);
+  }, []);
 
   if (auth.loading) {
     return (
