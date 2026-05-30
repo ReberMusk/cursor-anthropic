@@ -204,10 +204,31 @@ export const SCHED_DEFAULTS = {
   transientCooldownMs: 30 * 1000,
 };
 
+/**
+ * Default phrases that mark an error as ACCOUNT-LEVEL (token/quota/abuse), so the
+ * account is cooled down and we fail over. Anything NOT matching these (e.g. a
+ * parameter error like "Max Mode Required") is treated as a request error and is
+ * returned to the client WITHOUT disabling the account. Editable in Settings;
+ * leaving the list empty falls back to these defaults.
+ */
+export const DEFAULT_ACCOUNT_ERROR_KEYWORDS = [
+  "Free users can only use GPT 4.1 or Auto as premium model",
+  "Your request has been blocked as our system has detected suspicious activity from your account",
+  "blocked",
+  "Click Continue to increase",
+  "pay your invoice",
+  "slow pool",
+  "Please switch to auto or Auto",
+  "You're out of usage",
+];
+
 export const GATEWAY_DEFAULTS = {
   // Emit Cursor's `thinking` as Anthropic thinking blocks. OFF by default because
   // these blocks carry no Anthropic signature and some clients reject them.
   emitThinking: false,
+  // Keyword list (one per line in the UI) that marks an error as account-level.
+  // See DEFAULT_ACCOUNT_ERROR_KEYWORDS above. Empty ⇒ use the defaults.
+  accountErrorKeywords: DEFAULT_ACCOUNT_ERROR_KEYWORDS,
   // Which Cursor conversation mode to request:
   //   "agent" (default) — always Agent mode, so the model will actually call tools
   //                        (write_file, run terminal, etc). Without this, plain

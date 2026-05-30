@@ -11,7 +11,7 @@ import { callCursor, streamCursor } from "../gateway/executor.js";
 import { claudeToCursor, buildAnthropicMessage, createSSEStream } from "../gateway/translate.js";
 import { mapModel } from "../gateway/constants.js";
 import { selectAccount, resolveProxyForAccount } from "../scheduler/selectAccount.js";
-import { markUnavailable, markSuccess } from "../scheduler/fallback.js";
+import { markUnavailable, markSuccess, isAccountError } from "../scheduler/fallback.js";
 import { accounts, proxyPools, usage, settings, GATEWAY_DEFAULTS } from "../db/repos.js";
 import { requireApiKey } from "../auth/apikey.js";
 
@@ -74,6 +74,15 @@ router.post("/v1/messages", requireApiKey, async (req, res) => {
     await accounts.bumpUsage(acc.id);
     await usage.record({ accountId: acc.id, apiKeyId: req.apiKeyId, model, status: 200, ok: true });
   };
+  // A request/parameter error (not the account's fault, e.g. "Max Mode
+  // Required"): record it but DO NOT cool down / disable the account.
+  const requestError = async (acc, status, errText) => {
+    logWarn(`✗ request error (not account-level) account=${acc.name || acc.user_id || acc.id} status=${status} error="${short(errText)}" — returning to client`);
+    await usage.record({ accountId: acc.id, apiKeyId: req.apiKeyId, model, status: status || 400, ok: false });
+  };
+  // Request/parameter errors are client problems, not server failures — surface
+  // them as 400 (invalid_request_error) regardless of the upstream status.
+  const httpFor = () => 400;
 
   // try accounts until one succeeds or all are exhausted
   for (let attempt = 0; attempt < 50; attempt++) {
@@ -113,9 +122,14 @@ router.post("/v1/messages", requireApiKey, async (req, res) => {
 
       const ev0 = first.value;
       if (!first.done && ev0?.type === "error" && ev0.retryable) {
-        await fail(acc, ev0.status, ev0.error);
         try { await gen.return(); } catch {}
-        continue;
+        if (isAccountError(ev0.status, ev0.error, gateway)) {
+          await fail(acc, ev0.status, ev0.error);
+          continue;
+        }
+        // request/parameter error — keep the account healthy, return to client
+        await requestError(acc, ev0.status, ev0.error);
+        return anthropicError(res, httpFor(ev0.status), "invalid_request_error", ev0.error || "Cursor request error");
       }
 
       // committed to this account
@@ -159,7 +173,15 @@ router.post("/v1/messages", requireApiKey, async (req, res) => {
     catch (e) { await fail(acc, 502, e.message); continue; }
 
     const hasContent = decoded.text || (decoded.toolCalls || []).length;
-    if (decoded.error && !hasContent) { await fail(acc, decoded.status || 500, decoded.error); continue; }
+    if (decoded.error && !hasContent) {
+      if (isAccountError(decoded.status || 500, decoded.error, gateway)) {
+        await fail(acc, decoded.status || 500, decoded.error);
+        continue;
+      }
+      // request/parameter error — keep the account healthy, return to client
+      await requestError(acc, decoded.status, decoded.error);
+      return anthropicError(res, httpFor(decoded.status), "invalid_request_error", decoded.error);
+    }
 
     await succeed(acc);
     res.setHeader("x-cursor-account", acc.id);

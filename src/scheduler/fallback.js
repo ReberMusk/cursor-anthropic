@@ -6,10 +6,36 @@
  * success we reset its backoff. Region errors ("not available in your region",
  * region-gated models) are treated as longer cooldowns, not transient.
  */
-import { accounts, settings, SCHED_DEFAULTS } from "../db/repos.js";
+import { accounts, settings, SCHED_DEFAULTS, DEFAULT_ACCOUNT_ERROR_KEYWORDS } from "../db/repos.js";
 
 async function cfg() {
   return { ...SCHED_DEFAULTS, ...((await settings.get("scheduler")) || {}) };
+}
+
+/** Normalize the configured account-error keyword list (array or newline text). */
+export function accountErrorKeywords(gateway) {
+  const raw = gateway?.accountErrorKeywords;
+  let list = Array.isArray(raw) ? raw : typeof raw === "string" ? raw.split(/\r?\n/) : [];
+  list = list.map((s) => String(s).trim()).filter(Boolean);
+  return list.length ? list : DEFAULT_ACCOUNT_ERROR_KEYWORDS;
+}
+
+/**
+ * Decide whether a Cursor error is ACCOUNT-LEVEL (cool down + fail over) or just
+ * a request/parameter error (return to the client, keep the account healthy).
+ *
+ * Hard protocol signals (401 auth, 429 rate-limit) are always account-level.
+ * 403 is intentionally NOT hard-coded — Cursor returns 403 for request-level
+ * issues too (e.g. "Max Mode Required", model not permitted), so we let the
+ * keyword list decide. Real account-level 403s ("blocked"/"suspicious
+ * activity") are covered by the default keywords. Anything unmatched is a
+ * request error and must NOT disable the token.
+ */
+export function isAccountError(httpStatus, errorText, gateway) {
+  if (httpStatus === 401 || httpStatus === 429) return true;
+  const s = (typeof errorText === "string" ? errorText : JSON.stringify(errorText || "")).toLowerCase();
+  if (!s) return false;
+  return accountErrorKeywords(gateway).some((kw) => s.includes(kw.toLowerCase()));
 }
 
 const ERROR_RULES = [

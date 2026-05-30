@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Button, Spinner, Switch, Divider } from "@heroui/react";
 import { getSettings, saveScheduler, saveGateway, changePassword } from "../lib/api.js";
-import { PageHeader, SectionCard, NumberField, SelectField, TextField } from "../components/ui.jsx";
+import { PageHeader, SectionCard, NumberField, SelectField, TextField, AreaField } from "../components/ui.jsx";
 
 const FIELD_HELP = {
   stickyLimit: "同一账号连续命中的最大次数（round-robin 下）",
@@ -103,6 +103,17 @@ export default function Settings({ onPasswordChanged }) {
             onValueChange={(v) => setGateway((g) => ({ ...g, emitThinking: v }))}
           />
         </div>
+
+        <Divider className="bg-default-100" />
+
+        <AreaField
+          label="账号级异常的报错关键词（支持关键字匹配）"
+          description="一行一个报错提示，自行去后台日志抓取。命中的报错会被标记为账号级异常（冷却该账号并切换到下一个）；未命中的（如参数错误 Max Mode Required）不会禁用账号，直接把错误返回给客户端。注意：HTTP 401/403/429 始终视为账号级。留空则使用程序内置默认列表。"
+          minRows={8}
+          value={(gateway.accountErrorKeywords || []).join("\n")}
+          onValueChange={(v) => setGateway((g) => ({ ...g, accountErrorKeywords: v.split(/\r?\n/) }))}
+          placeholder={"You're out of usage\nslow pool\npay your invoice"}
+        />
         {SaveRow}
       </SectionCard>
 

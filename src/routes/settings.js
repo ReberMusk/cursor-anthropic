@@ -19,6 +19,11 @@ router.put("/api/settings/gateway", requireAdmin, async (req, res) => {
   const next = { ...cur };
   if (b.emitThinking !== undefined) next.emitThinking = !!b.emitThinking;
   if (b.cursorMode !== undefined && ["agent", "ask", "auto"].includes(b.cursorMode)) next.cursorMode = b.cursorMode;
+  if (b.accountErrorKeywords !== undefined) {
+    const raw = b.accountErrorKeywords;
+    const arr = Array.isArray(raw) ? raw : String(raw).split(/\r?\n/);
+    next.accountErrorKeywords = arr.map((s) => String(s).trim()).filter(Boolean);
+  }
   await settings.set("gateway", next);
   res.json({ gateway: next });
 });
