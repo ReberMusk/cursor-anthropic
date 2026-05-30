@@ -10,7 +10,7 @@ router.post("/api/auth/login", async (req, res) => {
   if (!username || !password) return res.status(400).json({ error: "username and password required" });
   const result = await login(username, password);
   if (!result) return res.status(401).json({ error: "invalid credentials" });
-  setSessionCookie(res, result.token);
+  setSessionCookie(res, result.token, req);
   res.json({ ok: true, admin: result.admin });
 });
 

@@ -28,6 +28,10 @@ const WEB_DIST = path.resolve(__dirname, "../web/dist");
 
 const app = express();
 app.disable("x-powered-by");
+// Honor X-Forwarded-* from a reverse proxy (TLS termination, real client IP),
+// so req.secure / req.protocol reflect the original scheme. Safe for a
+// self-hosted gateway that always sits behind its own proxy or is exposed directly.
+app.set("trust proxy", true);
 app.use(express.json({ limit: "25mb" }));
 app.use(express.text({ type: "text/plain", limit: "25mb" }));
 

@@ -67,8 +67,20 @@ export function requireAdmin(req, res, next) {
   next();
 }
 
-export function setSessionCookie(res, token) {
-  const secure = process.env.NODE_ENV === "production";
+/** True when the request actually arrived over HTTPS (directly or via proxy). */
+function isSecureRequest(req) {
+  if (!req) return false;
+  if (req.secure) return true; // requires Express "trust proxy" when behind a reverse proxy
+  const xfProto = String(req.headers?.["x-forwarded-proto"] || "").split(",")[0].trim().toLowerCase();
+  return xfProto === "https";
+}
+
+export function setSessionCookie(res, token, req) {
+  // Only mark the cookie Secure when the connection is genuinely HTTPS.
+  // Tying this to NODE_ENV broke plain-HTTP deployments (e.g. http://host:8787):
+  // browsers silently drop Secure cookies sent over http, so the session was
+  // never stored and every follow-up request failed with "Admin login required".
+  const secure = isSecureRequest(req);
   res.setHeader("Set-Cookie",
     `${COOKIE_NAME}=${encodeURIComponent(token)}; HttpOnly; Path=/; SameSite=Strict; Max-Age=${7 * 24 * 3600}${secure ? "; Secure" : ""}`);
 }
