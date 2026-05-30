@@ -25,8 +25,10 @@ services:
       ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
       JWT_SECRET: ${JWT_SECRET:-}
-      # default upstream model + optional global proxy
-      CURSOR_MODEL: ${CURSOR_MODEL:-claude-4-sonnet}
+      # Optional: force ONE upstream model for every request (overrides the
+      # per-request `model`). Leave empty to honor the model from each request
+      # (mapped to a Cursor model: haiku/opus/sonnet → claude-3.5-haiku/4-opus/4-sonnet).
+      CURSOR_MODEL: ${CURSOR_MODEL:-}
       ALL_PROXY: ${ALL_PROXY:-}
       GATEWAY_API_KEY: ${GATEWAY_API_KEY:-}
     depends_on:

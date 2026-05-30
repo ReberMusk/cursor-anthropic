@@ -7,6 +7,10 @@ import { callCursor } from "../gateway/executor.js";
 import { resolveProxyForAccount } from "../scheduler/selectAccount.js";
 import { markUnavailable, markSuccess } from "../scheduler/fallback.js";
 import { generateCursorIds } from "../lib/machineId.js";
+import { fetchUsageSummary } from "../lib/cursorUsage.js";
+
+/** A request opts a token check IN unless it explicitly passes check:false. */
+const wantsCheck = (body) => body?.check !== false && body?.checkToken !== false;
 
 const router = Router();
 router.use("/api/accounts", requireAdmin);
@@ -18,18 +22,43 @@ router.get("/api/accounts", async (req, res) => {
 
 router.post("/api/accounts", async (req, res) => {
   try {
-    const { account, created } = await importAccount(req.body || {});
-    res.status(created ? 201 : 200).json({ account: publicAccount(account), created });
+    const body = req.body || {};
+    const { account, created, usage } = await importAccount(body, { check: wantsCheck(body) });
+    res.status(created ? 201 : 200).json({ account: publicAccount(account), created, usage: usage || null });
   } catch (e) {
-    res.status(400).json({ error: e.message });
+    // token-validation failures are a 422 so the UI can distinguish them
+    res.status(e.tokenInvalid ? 422 : 400).json({ error: e.message, tokenInvalid: !!e.tokenInvalid });
   }
 });
 
 router.post("/api/accounts/bulk-import", async (req, res) => {
   // body may be { text } | { accounts:[...] } | a raw array
   const payload = Array.isArray(req.body) ? req.body : (req.body?.text ?? req.body);
-  const summary = await bulkImport(payload);
+  const check = Array.isArray(req.body) ? true : wantsCheck(req.body);
+  const summary = await bulkImport(payload, { check });
   res.json(summary);
+});
+
+// Apply an action to many accounts at once: delete | activate | deactivate | reset-cooldown.
+router.post("/api/accounts/bulk-action", async (req, res) => {
+  const { ids, action } = req.body || {};
+  if (!Array.isArray(ids) || !ids.length) return res.status(400).json({ error: "ids required" });
+  const valid = new Set(["delete", "activate", "deactivate", "reset-cooldown"]);
+  if (!valid.has(action)) return res.status(400).json({ error: `unknown action: ${action}` });
+
+  let affected = 0;
+  for (const id of ids) {
+    const a = await accounts.get(id);
+    if (!a) continue;
+    if (action === "delete") await accounts.remove(id);
+    else if (action === "activate") await accounts.setActive(id, true);
+    else if (action === "deactivate") await accounts.setActive(id, false);
+    else if (action === "reset-cooldown") {
+      await accounts.update(id, { status: "active", cooldown_until: null, backoff_level: 0, last_error: null });
+    }
+    affected++;
+  }
+  res.json({ ok: true, affected });
 });
 
 router.get("/api/accounts/:id", async (req, res) => {
@@ -100,6 +129,24 @@ router.post("/api/accounts/:id/test", async (req, res) => {
     await markUnavailable(a.id, 502, e.message);
     res.json({ ok: false, error: e.message, account: publicAccount(await accounts.get(a.id)) });
   }
+});
+
+// Refresh an account's last-30-day usage (also re-validates the token).
+router.post("/api/accounts/:id/usage", async (req, res) => {
+  const a = await accounts.get(req.params.id);
+  if (!a) return res.status(404).json({ error: "not found" });
+  const proxyUrl = await resolveProxyForAccount(a, proxyPools);
+  const usage = await fetchUsageSummary({ accessToken: a.access_token, userId: a.user_id, proxyUrl });
+  if (!usage.ok) {
+    return res.json({ ok: false, status: usage.status, error: usage.error, account: publicAccount(a) });
+  }
+  const updated = await accounts.update(a.id, {
+    usage_cents: usage.totalCents ?? null,
+    usage_events: usage.includedEvents ?? null,
+    usage_checked_at: new Date().toISOString(),
+    last_active_at: usage.lastActiveAt || null,
+  });
+  res.json({ ok: true, usage, account: publicAccount(updated) });
 });
 
 router.delete("/api/accounts/:id", async (req, res) => {

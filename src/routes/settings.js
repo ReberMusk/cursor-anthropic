@@ -18,6 +18,7 @@ router.put("/api/settings/gateway", requireAdmin, async (req, res) => {
   const b = req.body || {};
   const next = { ...cur };
   if (b.emitThinking !== undefined) next.emitThinking = !!b.emitThinking;
+  if (b.cursorMode !== undefined && ["agent", "ask", "auto"].includes(b.cursorMode)) next.cursorMode = b.cursorMode;
   await settings.set("gateway", next);
   res.json({ gateway: next });
 });

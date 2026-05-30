@@ -7,7 +7,8 @@ import {
 } from "@heroui/react";
 import {
   listAccounts, importAccount, bulkImport, patchAccount, activateAccount,
-  deactivateAccount, resetCooldown, regenMachineId, testAccount, deleteAccount,
+  deactivateAccount, resetCooldown, regenMachineId, testAccount, refreshUsage, deleteAccount,
+  bulkAccountAction,
 } from "../lib/api.js";
 import { PageHeader, TextField, AreaField } from "../components/ui.jsx";
 
@@ -27,10 +28,34 @@ function StatusChip({ a }) {
   return <Chip size="sm" variant="flat" color={STATUS_COLOR[status] || "default"}>{label}</Chip>;
 }
 
+function UsageCell({ a }) {
+  if (a.usage_checked_at == null && a.usage_cents == null) {
+    return <span className="text-tiny text-default-400">—</span>;
+  }
+  const amount = typeof a.usage_cents === "number" ? a.usage_cents / 100 : 0;
+  const checked = a.usage_checked_at ? new Date(a.usage_checked_at).toLocaleString() : "未知";
+  const lastActive = a.last_active_at ? new Date(a.last_active_at).toLocaleString() : "无记录";
+  return (
+    <Tooltip content={<div className="text-tiny">计费事件 {a.usage_events ?? 0} 条<br />最近活跃 {lastActive}<br />检测于 {checked}</div>}>
+      <div className="leading-tight">
+        <div className="text-small font-medium">${amount.toFixed(2)}</div>
+        <div className="text-tiny text-default-400">{a.usage_events ?? 0} 事件</div>
+      </div>
+    </Tooltip>
+  );
+}
+
+const BATCH_LABELS = {
+  activate: "批量启用", deactivate: "批量停用",
+  "reset-cooldown": "清除冷却", delete: "批量删除",
+};
+
 export default function Accounts() {
   const [accounts, setAccounts] = useState(null);
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState({});
+  const [selected, setSelected] = useState(new Set());
+  const [batchBusy, setBatchBusy] = useState(false);
   const importModal = useDisclosure();
 
   const load = useCallback(() => listAccounts().then((r) => setAccounts(r.accounts)).catch((e) => setErr(e.message)), []);
@@ -48,6 +73,23 @@ export default function Accounts() {
     finally { setBusy((b) => ({ ...b, [id]: false })); }
   };
 
+  const selectedIds = selected === "all"
+    ? (accounts || []).map((a) => a.id)
+    : Array.from(selected);
+
+  const runBatch = async (action) => {
+    if (!selectedIds.length) return;
+    if (action === "delete" && !window.confirm(`确定删除选中的 ${selectedIds.length} 个账号？此操作不可撤销。`)) return;
+    setBatchBusy(true);
+    setErr("");
+    try {
+      await bulkAccountAction(selectedIds, action);
+      setSelected(new Set());
+      await load();
+    } catch (e) { setErr(e.message); }
+    finally { setBatchBusy(false); }
+  };
+
   if (err && !accounts) return <div className="text-danger">{err}</div>;
   if (!accounts) return <div className="flex justify-center py-20"><Spinner /></div>;
 
@@ -61,12 +103,29 @@ export default function Accounts() {
       />
       {err && <div className="text-small text-danger">{err}</div>}
 
+      {selectedIds.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2 rounded-medium border border-primary/30 bg-primary/5 px-3 py-2">
+          <span className="text-small">已选 <b>{selectedIds.length}</b> 个账号</span>
+          <div className="ml-auto flex flex-wrap gap-2">
+            <Button size="sm" variant="flat" color="success" isLoading={batchBusy} onPress={() => runBatch("activate")}>{BATCH_LABELS.activate}</Button>
+            <Button size="sm" variant="flat" isLoading={batchBusy} onPress={() => runBatch("deactivate")}>{BATCH_LABELS.deactivate}</Button>
+            <Button size="sm" variant="flat" color="warning" isLoading={batchBusy} onPress={() => runBatch("reset-cooldown")}>{BATCH_LABELS["reset-cooldown"]}</Button>
+            <Button size="sm" variant="flat" color="danger" isLoading={batchBusy} onPress={() => runBatch("delete")}>{BATCH_LABELS.delete}</Button>
+            <Button size="sm" variant="light" onPress={() => setSelected(new Set())}>取消选择</Button>
+          </div>
+        </div>
+      )}
+
       <div className="rounded-large border border-default-100 bg-content1/80 p-2">
-      <Table aria-label="accounts" removeWrapper isStriped>
+      <Table
+        aria-label="accounts" removeWrapper isStriped
+        selectionMode="multiple" selectedKeys={selected} onSelectionChange={setSelected}
+      >
         <TableHeader>
           <TableColumn>名称 / 邮箱</TableColumn>
           <TableColumn>优先级</TableColumn>
           <TableColumn>状态</TableColumn>
+          <TableColumn>近30天额度</TableColumn>
           <TableColumn>machineId</TableColumn>
           <TableColumn>请求 / 错误</TableColumn>
           <TableColumn>过期</TableColumn>
@@ -87,6 +146,7 @@ export default function Accounts() {
                 />
               </TableCell>
               <TableCell><StatusChip a={a} /></TableCell>
+              <TableCell><UsageCell a={a} /></TableCell>
               <TableCell><span className="font-mono text-tiny">{(a.machine_id || "").slice(0, 14)}…</span></TableCell>
               <TableCell><span className="text-small">{a.total_requests} / <span className="text-danger">{a.total_errors}</span></span></TableCell>
               <TableCell><span className="text-tiny text-default-500">{a.expires_at ? new Date(a.expires_at).toLocaleDateString() : "—"}</span></TableCell>
@@ -102,11 +162,16 @@ export default function Accounts() {
                   <Dropdown>
                     <DropdownTrigger><Button size="sm" variant="light" isIconOnly>⋯</Button></DropdownTrigger>
                     <DropdownMenu aria-label="actions" onAction={(key) => {
+                      if (key === "usage") act(a.id, async () => {
+                        const r = await refreshUsage(a.id);
+                        if (!r.ok) setErr(`刷新额度失败: ${r.error || r.status}`);
+                      });
                       if (key === "toggle") act(a.id, () => (a.is_active ? deactivateAccount(a.id) : activateAccount(a.id)));
                       if (key === "cooldown") act(a.id, () => resetCooldown(a.id));
                       if (key === "regen") act(a.id, () => regenMachineId(a.id));
                       if (key === "delete") act(a.id, () => deleteAccount(a.id));
                     }}>
+                      <DropdownItem key="usage">刷新额度</DropdownItem>
                       <DropdownItem key="toggle">{a.is_active ? "停用" : "启用"}</DropdownItem>
                       <DropdownItem key="cooldown">清除冷却</DropdownItem>
                       <DropdownItem key="regen">重新生成 machineId</DropdownItem>
@@ -133,6 +198,7 @@ function ImportModal({ disclosure, onDone }) {
   const [name, setName] = useState("");
   const [machineId, setMachineId] = useState("");
   const [ghost, setGhost] = useState(true);
+  const [check, setCheck] = useState(true);
   const [bulk, setBulk] = useState("");
   const [result, setResult] = useState(null);
   const [error, setError] = useState("");
@@ -143,7 +209,7 @@ function ImportModal({ disclosure, onDone }) {
   const submitSingle = async () => {
     setError(""); setResult(null); setLoading(true);
     try {
-      const r = await importAccount({ accessToken: token.trim(), name: name.trim() || undefined, machineId: machineId.trim() || undefined, ghostMode: ghost });
+      const r = await importAccount({ accessToken: token.trim(), name: name.trim() || undefined, machineId: machineId.trim() || undefined, ghostMode: ghost, check });
       setResult({ single: r });
       onDone?.();
     } catch (e) { setError(e.message); }
@@ -153,8 +219,10 @@ function ImportModal({ disclosure, onDone }) {
   const submitBulk = async () => {
     setError(""); setResult(null); setLoading(true);
     try {
-      const r = await bulkImport(bulk);
+      const r = await bulkImport(bulk, check);
       setResult({ bulk: r });
+      // Keep only the failed lines in the textarea so the user can fix & retry.
+      if (r.failedText !== undefined) setBulk(r.failedText);
       onDone?.();
     } catch (e) { setError(e.message); }
     finally { setLoading(false); }
@@ -191,15 +259,31 @@ function ImportModal({ disclosure, onDone }) {
                 </Tab>
               </Tabs>
 
+              <div className="flex items-center justify-between rounded-medium bg-default-100 px-3 py-2">
+                <div className="text-tiny text-default-500">
+                  导入前校验令牌有效性并获取近30天额度（无效令牌不会被添加；批量模式下会保留在输入框中）
+                </div>
+                <Switch isSelected={check} onValueChange={setCheck} size="sm" />
+              </div>
+
               {error && <div className="text-small text-danger">{error}</div>}
-              {result?.single && <div className="text-small text-success">已{result.single.created ? "导入" : "更新"}：{result.single.account.name || result.single.account.user_id}</div>}
+              {result?.single && (
+                <div className="text-small text-success">
+                  已{result.single.created ? "导入" : "更新"}：{result.single.account.name || result.single.account.user_id}
+                  {result.single.usage && (
+                    <span className="text-default-500">
+                      {" "}· 近30天额度 ${Number(result.single.usage.totalAmount || 0).toFixed(2)}（{result.single.usage.includedEvents || 0} 事件）
+                    </span>
+                  )}
+                </div>
+              )}
               {result?.bulk && (
                 <div className="text-small">
                   <span className="text-success">导入 {result.bulk.imported} · 更新 {result.bulk.updated}</span>
-                  {result.bulk.skipped > 0 && <span className="text-danger"> · 跳过 {result.bulk.skipped}</span>}
+                  {result.bulk.skipped > 0 && <span className="text-danger"> · 跳过 {result.bulk.skipped}（无效令牌已保留在上方输入框）</span>}
                   {result.bulk.errors?.length > 0 && (
                     <ul className="mt-1 text-tiny text-danger list-disc pl-4">
-                      {result.bulk.errors.slice(0, 5).map((e, i) => <li key={i}>第 {e.line} 行: {e.reason}</li>)}
+                      {result.bulk.errors.slice(0, 8).map((e, i) => <li key={i}>第 {e.line} 行: {e.reason}</li>)}
                     </ul>
                   )}
                 </div>

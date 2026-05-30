@@ -42,20 +42,23 @@ export const saveGateway = (g) => api.put("/api/settings/gateway", g);
 // accounts
 export const listAccounts = () => api.get("/api/accounts");
 export const importAccount = (a) => api.post("/api/accounts", a);
-export const bulkImport = (text) => api.post("/api/accounts/bulk-import", { text });
+export const bulkImport = (text, check = true) => api.post("/api/accounts/bulk-import", { text, check });
 export const patchAccount = (id, f) => api.patch(`/api/accounts/${id}`, f);
 export const activateAccount = (id) => api.post(`/api/accounts/${id}/activate`);
 export const deactivateAccount = (id) => api.post(`/api/accounts/${id}/deactivate`);
 export const resetCooldown = (id) => api.post(`/api/accounts/${id}/reset-cooldown`);
 export const regenMachineId = (id) => api.post(`/api/accounts/${id}/regenerate-machine-id`);
 export const testAccount = (id, model) => api.post(`/api/accounts/${id}/test`, model ? { model } : {});
+export const refreshUsage = (id) => api.post(`/api/accounts/${id}/usage`);
 export const deleteAccount = (id) => api.del(`/api/accounts/${id}`);
+export const bulkAccountAction = (ids, action) => api.post("/api/accounts/bulk-action", { ids, action });
 
 // proxy pools
 export const listPools = () => api.get("/api/proxy-pools");
 export const createPool = (p) => api.post("/api/proxy-pools", p);
 export const patchPool = (id, f) => api.patch(`/api/proxy-pools/${id}`, f);
 export const deletePool = (id) => api.del(`/api/proxy-pools/${id}`);
+export const bulkPoolAction = (ids, action) => api.post("/api/proxy-pools/bulk-action", { ids, action });
 export const testProxy = (payload) => api.post("/api/proxy-pools/test", payload);
 
 // api keys

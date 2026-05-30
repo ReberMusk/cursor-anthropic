@@ -6,6 +6,7 @@
 import { accounts } from "../db/repos.js";
 import { parseCursorToken, extractAccessToken } from "./jwt.js";
 import { resolveMachineId, generateCursorIds, looksLikeMachineId } from "./machineId.js";
+import { fetchUsageSummary } from "./cursorUsage.js";
 
 const cleanTok = extractAccessToken;
 const isEmail = (s) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(s || "").trim());
@@ -53,14 +54,48 @@ export function buildAccountRecord(input) {
   };
 }
 
+/** Map a usage summary onto the DB columns we persist. */
+function usageColumns(usage) {
+  if (!usage || !usage.ok) return {};
+  return {
+    usage_cents: usage.totalCents ?? null,
+    usage_events: usage.includedEvents ?? null,
+    usage_checked_at: new Date().toISOString(),
+    last_active_at: usage.lastActiveAt || null,
+  };
+}
+
 /**
  * Import or update a single account. Idempotent: dedupe by the Cursor user id
  * (JWT `sub`, stable for the lifetime of the account) first, then email, then
  * the raw token. On update we KEEP the existing device identity so re-importing
  * the same account never spawns a new "computer" on Cursor's side.
+ *
+ * @param {object} input  raw account fields
+ * @param {{check?:boolean, proxyUrl?:string|null}} opts
+ *   when check=true, the token is validated against Cursor's usage API before
+ *   importing; an invalid token throws (err.tokenInvalid=true) and nothing is
+ *   written. The 30-day usage summary is attached to the row and returned.
  */
-export async function importAccount(input) {
+export async function importAccount(input, opts = {}) {
   const rec = buildAccountRecord(input);
+
+  let usage = null;
+  if (opts.check) {
+    usage = await fetchUsageSummary({
+      accessToken: rec.access_token,
+      userId: rec.user_id,
+      proxyUrl: opts.proxyUrl ?? rec.proxy_url ?? process.env.ALL_PROXY ?? process.env.HTTPS_PROXY ?? null,
+    });
+    if (!usage.ok) {
+      const err = new Error(usage.error || `令牌校验失败（HTTP ${usage.status || "?"}）`);
+      err.tokenInvalid = true;
+      err.status = usage.status;
+      throw err;
+    }
+  }
+  const usageCols = usageColumns(usage);
+
   const existing =
     (rec.user_id && (await accounts.getByUserId(rec.user_id))) ||
     (rec.email && (await accounts.getByEmail(rec.email))) ||
@@ -83,10 +118,13 @@ export async function importAccount(input) {
       ...(rec.name ? { name: rec.name } : {}),
       ...(rec.proxy_url ? { proxy_url: rec.proxy_url } : {}),
       ...(rec.proxy_pool_id ? { proxy_pool_id: rec.proxy_pool_id } : {}),
+      ...usageCols,
     });
-    return { account: updated, created: false };
+    return { account: updated, created: false, usage };
   }
-  return { account: await accounts.create(rec), created: true };
+  let account = await accounts.create(rec);
+  if (Object.keys(usageCols).length) account = await accounts.update(account.id, usageCols);
+  return { account, created: true, usage };
 }
 
 /**
@@ -104,8 +142,15 @@ export async function importAccount(input) {
  * Returns an array of raw input objects to feed importAccount.
  */
 export function parseBulk(payload) {
-  if (Array.isArray(payload)) return payload;
-  if (payload && typeof payload === "object" && Array.isArray(payload.accounts)) return payload.accounts;
+  const withRaw = (items) =>
+    items.map((it) =>
+      it && typeof it === "object" && !Array.isArray(it)
+        ? { _raw: it._raw ?? JSON.stringify(it), ...it }
+        : it
+    );
+
+  if (Array.isArray(payload)) return withRaw(payload);
+  if (payload && typeof payload === "object" && Array.isArray(payload.accounts)) return withRaw(payload.accounts);
 
   const text = typeof payload === "string" ? payload : String(payload?.text || "");
   const trimmed = text.trim();
@@ -115,8 +160,8 @@ export function parseBulk(payload) {
   if (trimmed.startsWith("[") || trimmed.startsWith("{")) {
     try {
       const parsed = JSON.parse(trimmed);
-      if (Array.isArray(parsed)) return parsed;
-      if (Array.isArray(parsed.accounts)) return parsed.accounts;
+      if (Array.isArray(parsed)) return withRaw(parsed);
+      if (Array.isArray(parsed.accounts)) return withRaw(parsed.accounts);
     } catch { /* fall through to line parsing */ }
   }
 
@@ -142,24 +187,31 @@ export function parseBulk(payload) {
     const rest = parts.filter((p) => p !== token);
     const email = rest.find(isEmail) || undefined;
     const machineId = rest.find((p) => looksLikeMachineId(p)) || undefined;
-    out.push({ accessToken: token, email, machineId });
+    out.push({ accessToken: token, email, machineId, _raw: l });
   }
   return out;
 }
 
-/** Run a bulk import, returning a summary. */
-export async function bulkImport(payload) {
+/**
+ * Run a bulk import, returning a summary. When opts.check=true each token is
+ * validated against Cursor's usage API; failed lines are collected verbatim in
+ * `failedText` so the UI can keep them in the textarea for a retry.
+ */
+export async function bulkImport(payload, opts = {}) {
   const items = parseBulk(payload);
-  const result = { total: items.length, imported: 0, updated: 0, skipped: 0, errors: [] };
+  const result = { total: items.length, imported: 0, updated: 0, skipped: 0, errors: [], failedText: "" };
+  const failedLines = [];
   for (let i = 0; i < items.length; i++) {
     try {
-      const { created } = await importAccount(items[i]);
+      const { created } = await importAccount(items[i], opts);
       if (created) result.imported++; else result.updated++;
     } catch (e) {
       result.skipped++;
-      result.errors.push({ line: i + 1, reason: e.message });
+      result.errors.push({ line: i + 1, reason: e.message, tokenInvalid: !!e.tokenInvalid });
+      if (items[i]?._raw) failedLines.push(items[i]._raw);
     }
   }
+  result.failedText = failedLines.join("\n");
   return result;
 }
 
@@ -190,6 +242,10 @@ export function publicAccount(a) {
     proxy_url: a.proxy_url,
     total_requests: a.total_requests,
     total_errors: a.total_errors,
+    usage_cents: a.usage_cents ?? null,
+    usage_events: a.usage_events ?? null,
+    usage_checked_at: a.usage_checked_at || null,
+    last_active_at: a.last_active_at || null,
     created_at: a.created_at,
     updated_at: a.updated_at,
   };

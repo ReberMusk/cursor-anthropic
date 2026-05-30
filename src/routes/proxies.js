@@ -43,6 +43,24 @@ router.delete("/api/proxy-pools/:id", async (req, res) => {
   res.json({ ok: true });
 });
 
+// Apply an action to many pools at once: delete | activate | deactivate.
+router.post("/api/proxy-pools/bulk-action", async (req, res) => {
+  const { ids, action } = req.body || {};
+  if (!Array.isArray(ids) || !ids.length) return res.status(400).json({ error: "ids required" });
+  const valid = new Set(["delete", "activate", "deactivate"]);
+  if (!valid.has(action)) return res.status(400).json({ error: `unknown action: ${action}` });
+
+  let affected = 0;
+  for (const id of ids) {
+    const p = await proxyPools.get(id);
+    if (!p) continue;
+    if (action === "delete") await proxyPools.remove(id);
+    else await proxyPools.update(id, { is_active: action === "activate" ? 1 : 0 });
+    affected++;
+  }
+  res.json({ ok: true, affected });
+});
+
 // Test a single proxy URL or every proxy in a pool.
 router.post("/api/proxy-pools/test", async (req, res) => {
   const { proxyUrl, poolId } = req.body || {};

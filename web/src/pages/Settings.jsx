@@ -76,6 +76,20 @@ export default function Settings({ onPasswordChanged }) {
       </SectionCard>
 
       <SectionCard title="响应行为">
+        <SelectField
+          label="Cursor 对话模式"
+          description="决定下发给 Cursor 的模式。默认 Agent，否则纯文本提问会进入 Ask（只读）模式，Cursor 会拒绝写文件 / 执行命令等工具调用。"
+          selectedKeys={[gateway.cursorMode || "agent"]}
+          onChange={(e) => e.target.value && setGateway((g) => ({ ...g, cursorMode: e.target.value }))}
+          options={[
+            { key: "agent", label: "Agent（推荐）", description: "始终 Agent 模式，模型可调用工具" },
+            { key: "ask", label: "Ask（只读）", description: "除非请求自带 tools，否则只读问答" },
+            { key: "auto", label: "Auto", description: "仅对 claude-cli/claude-code 客户端启用 Agent" },
+          ]}
+        />
+
+        <Divider className="bg-default-100" />
+
         <div className="flex items-start justify-between gap-4 rounded-medium border border-default-100 bg-content2/40 p-4">
           <div className="space-y-1">
             <div className="font-medium text-foreground">下发 thinking 块</div>

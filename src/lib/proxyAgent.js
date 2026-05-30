@@ -90,6 +90,15 @@ async function tunnel(proxyUrl, destHost, destPort) {
 }
 
 /**
+ * Public: open a raw TCP tunnel socket to destHost:destPort through any
+ * supported proxy. Callers wrap it in TLS themselves (e.g. for an HTTP/1.1
+ * REST call to a different host than the chat endpoint).
+ */
+export async function rawTunnel(proxyUrl, destHost, destPort) {
+  return tunnel(proxyUrl, destHost, destPort);
+}
+
+/**
  * Connect an HTTP/2 session to https://host (port 443) optionally via a proxy.
  * @param {string} host          e.g. "api2.cursor.sh"
  * @param {string|null} proxyUrl proxy URL or null for a direct connection

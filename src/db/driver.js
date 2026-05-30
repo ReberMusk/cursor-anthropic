@@ -15,7 +15,7 @@
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
-import { schemaStatements, sqliteIndexes } from "./schema.js";
+import { schemaStatements, sqliteIndexes, extraColumns } from "./schema.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DEFAULT_DB = path.resolve(__dirname, "../../data/cursor-anthropic.db");
@@ -58,6 +58,12 @@ async function createSqliteDriver() {
     async migrate() {
       for (const stmt of schemaStatements("sqlite")) conn.exec(stmt);
       for (const idx of sqliteIndexes()) conn.exec(idx);
+      for (const c of extraColumns("sqlite")) {
+        const cols = conn.prepare(`PRAGMA table_info(${c.table})`).all();
+        if (!cols.some((x) => x.name === c.column)) {
+          conn.exec(`ALTER TABLE ${c.table} ADD COLUMN ${c.column} ${c.type}`);
+        }
+      }
     },
     async close() { conn.close(); },
   };
@@ -90,7 +96,16 @@ async function createMysqlDriver() {
     async run(sql, params = []) { const [r] = await pool.execute(sql, norm(params)); return { changes: r.affectedRows }; },
     async get(sql, params = []) { const [rows] = await pool.execute(sql, norm(params)); return rows[0]; },
     async all(sql, params = []) { const [rows] = await pool.execute(sql, norm(params)); return rows; },
-    async migrate() { for (const stmt of schemaStatements("mysql")) await pool.query(stmt); },
+    async migrate() {
+      for (const stmt of schemaStatements("mysql")) await pool.query(stmt);
+      for (const c of extraColumns("mysql")) {
+        const [rows] = await pool.query(
+          "SELECT 1 FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name=? AND column_name=?",
+          [c.table, c.column]
+        );
+        if (!rows.length) await pool.query(`ALTER TABLE ${c.table} ADD COLUMN ${c.column} ${c.type}`);
+      }
+    },
     async close() { await pool.end(); },
   };
 }

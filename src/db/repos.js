@@ -208,4 +208,11 @@ export const GATEWAY_DEFAULTS = {
   // Emit Cursor's `thinking` as Anthropic thinking blocks. OFF by default because
   // these blocks carry no Anthropic signature and some clients reject them.
   emitThinking: false,
+  // Which Cursor conversation mode to request:
+  //   "agent" (default) — always Agent mode, so the model will actually call tools
+  //                        (write_file, run terminal, etc). Without this, plain
+  //                        prompts land in Ask mode and Cursor refuses to act.
+  //   "ask"             — Ask/read-only mode unless the request itself carries tools.
+  //   "auto"            — only force Agent for claude-cli/claude-code clients.
+  cursorMode: "agent",
 };

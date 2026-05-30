@@ -12,6 +12,7 @@ export function schemaStatements(dialect) {
   const SHORT = mysql ? "VARCHAR(255)" : "TEXT";
   const TS = mysql ? "VARCHAR(40)" : "TEXT";
   const BOOL = mysql ? "TINYINT" : "INTEGER";
+  const FLOAT = mysql ? "DOUBLE" : "REAL";
   const LONG = mysql ? "MEDIUMTEXT" : "TEXT";
   const AUTO_ID = mysql ? "BIGINT AUTO_INCREMENT PRIMARY KEY" : "INTEGER PRIMARY KEY AUTOINCREMENT";
   const ENGINE = mysql ? " ENGINE=InnoDB DEFAULT CHARSET=utf8mb4" : "";
@@ -43,6 +44,10 @@ export function schemaStatements(dialect) {
         `proxy_url ${SHORT}`,
         `total_requests INTEGER DEFAULT 0`,
         `total_errors INTEGER DEFAULT 0`,
+        `usage_cents ${FLOAT}`,
+        `usage_events INTEGER`,
+        `usage_checked_at ${TS}`,
+        `last_active_at ${TS}`,
         `created_at ${TS} NOT NULL`,
         `updated_at ${TS} NOT NULL`,
       ],
@@ -120,6 +125,23 @@ export function schemaStatements(dialect) {
     out.push(`CREATE TABLE IF NOT EXISTS ${name} (\n  ${parts.join(",\n  ")}\n)${ENGINE}`);
   }
   return out;
+}
+
+/**
+ * Columns added after the initial release. Applied idempotently on every boot
+ * (ALTER TABLE ... ADD COLUMN if missing) so existing databases pick them up
+ * without a manual migration. New databases already have them via CREATE TABLE.
+ */
+export function extraColumns(dialect) {
+  const mysql = dialect === "mysql";
+  const TS = mysql ? "VARCHAR(40)" : "TEXT";
+  const FLOAT = mysql ? "DOUBLE" : "REAL";
+  return [
+    { table: "cursor_accounts", column: "usage_cents", type: FLOAT },
+    { table: "cursor_accounts", column: "usage_events", type: "INTEGER" },
+    { table: "cursor_accounts", column: "usage_checked_at", type: TS },
+    { table: "cursor_accounts", column: "last_active_at", type: TS },
+  ];
 }
 
 /** Standalone indexes for SQLite (run after the tables are created). */
