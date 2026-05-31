@@ -10,6 +10,7 @@
  */
 import crypto from "crypto";
 import { supportedIdsFromClaudeTools, nativeCallToClaudeToolUse, ccToolToNative } from "./toolAdapter.js";
+import { buildToolSystemPrompt, renderToolUseMarker, renderToolResult } from "./toolSim.js";
 
 function escapeXml(t) {
   return String(t).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -38,7 +39,62 @@ function flattenContent(content) {
   return "";
 }
 
-export function claudeToCursor(body) {
+/**
+ * Tool-simulation translation: Cursor never surfaces client tools to the model,
+ * so we describe them in the prompt and run Cursor as a plain Chat (no native
+ * tools injected). The model emits marker blocks that the response side parses
+ * back into Anthropic tool_use. Prior tool_use/tool_result turns are rendered
+ * back into the transcript so multi-turn tool loops stay coherent.
+ *
+ * Returns { messages, tools:[], supportedIds:[], thinkingLevel, simulate:true }.
+ */
+function claudeToCursorSimulated(body) {
+  const out = [];
+
+  // id -> tool name, so tool_result blocks can name their tool.
+  const nameById = new Map();
+  for (const m of body.messages || []) {
+    if (!Array.isArray(m.content)) continue;
+    for (const b of m.content) if (b?.type === "tool_use") nameById.set(b.id, b.name);
+  }
+
+  // Leading system message: injected tool instructions + the client's system.
+  const sysParts = [buildToolSystemPrompt(body.tools)];
+  if (body.system) {
+    const s = typeof body.system === "string" ? body.system : flattenContent(body.system);
+    if (s.trim()) sysParts.push(s);
+  }
+  out.push({ role: "user", content: `[System Instructions]\n${sysParts.filter(Boolean).join("\n\n")}` });
+
+  for (const m of body.messages || []) {
+    const role = m.role === "assistant" ? "assistant" : "user";
+    if (typeof m.content === "string") {
+      if (m.content) out.push({ role, content: m.content });
+      continue;
+    }
+    if (!Array.isArray(m.content)) continue;
+    const parts = [];
+    for (const b of m.content) {
+      if (!b || typeof b !== "object") continue;
+      if (b.type === "text" && typeof b.text === "string") parts.push(b.text);
+      else if (b.type === "tool_use") parts.push(renderToolUseMarker(b));
+      else if (b.type === "tool_result") parts.push(renderToolResult(b, nameById));
+    }
+    const joined = parts.filter(Boolean).join("\n");
+    if (joined) out.push({ role, content: joined });
+  }
+
+  let thinkingLevel = null;
+  if (body.thinking?.type === "enabled") {
+    thinkingLevel = (body.thinking.budget_tokens || 0) >= 8000 ? "high" : "medium";
+  }
+  return { messages: out, tools: [], supportedIds: [], thinkingLevel, simulate: true };
+}
+
+export function claudeToCursor(body, opts = {}) {
+  const hasTools = Array.isArray(body.tools) && body.tools.length > 0;
+  if (opts.simulate && hasTools) return claudeToCursorSimulated(body);
+
   const out = [];
 
   // Collect tool_use id -> {name, input} and tool_result id -> resultText.
@@ -112,7 +168,7 @@ export function claudeToCursor(body) {
 
   // Do NOT encode CC tools as MCP tools (proven not to surface). Agent mode is
   // driven purely by supportedIds.
-  return { messages: out, tools: [], supportedIds, thinkingLevel };
+  return { messages: out, tools: [], supportedIds, thinkingLevel, simulate: false };
 }
 
 const newMsgId = () => "msg_" + crypto.randomBytes(12).toString("hex");
