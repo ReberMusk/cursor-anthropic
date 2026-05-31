@@ -77,6 +77,19 @@ export default function Settings({ onPasswordChanged }) {
 
       <SectionCard title="响应行为">
         <SelectField
+          label="工具调用处理"
+          description="Cursor 后端不会把客户端声明的工具暴露给模型（实测：会被丢弃，模型转而调用 Cursor 原生工具并泄漏给客户端）。simulate：把工具写进提示、以纯 Chat 模式运行、解析模型输出的标记块还原成 tool_use——支持任意工具（函数工具 + Anthropic 类型工具）。native：仅把少数 Claude Code 工具映射到 Cursor 原生工具（有损，自定义工具会失败）。"
+          selectedKeys={[gateway.toolMode || "simulate"]}
+          onChange={(e) => e.target.value && setGateway((g) => ({ ...g, toolMode: e.target.value }))}
+          options={[
+            { key: "simulate", label: "simulate（提示工程模拟，推荐）", description: "支持任意工具，纯 Chat 模式" },
+            { key: "native", label: "native（原生工具映射，遗留）", description: "仅少数 CC 工具，自定义工具失败" },
+          ]}
+        />
+
+        <Divider className="bg-default-100" />
+
+        <SelectField
           label="Cursor 对话模式"
           description="决定下发给 Cursor 的模式。默认 Agent，否则纯文本提问会进入 Ask（只读）模式，Cursor 会拒绝写文件 / 执行命令等工具调用。"
           selectedKeys={[gateway.cursorMode || "agent"]}

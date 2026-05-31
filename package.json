@@ -8,6 +8,7 @@
     "start": "node src/server.js",
     "dev": "node --watch src/server.js",
     "smoke": "node test/smoke.js",
+    "smoke:tools": "node test/tool-sim.mjs",
     "web:dev": "npm --prefix web run dev",
     "web:build": "npm --prefix web run build",
     "build": "npm --prefix web install && npm --prefix web run build",

@@ -8,7 +8,8 @@
  */
 import { Router } from "express";
 import { callCursor, streamCursor } from "../gateway/executor.js";
-import { claudeToCursor, buildAnthropicMessage, createSSEStream } from "../gateway/translate.js";
+import { claudeToCursor, buildAnthropicMessage, buildAnthropicSSE, createSSEStream } from "../gateway/translate.js";
+import { parseToolMarkers } from "../gateway/toolSim.js";
 import { mapModel } from "../gateway/constants.js";
 import { selectAccount, resolveProxyForAccount } from "../scheduler/selectAccount.js";
 import { markUnavailable, markSuccess, isAccountError } from "../scheduler/fallback.js";
@@ -39,23 +40,43 @@ router.post("/v1/messages", requireApiKey, async (req, res) => {
   const stream = body.stream !== false;
   const ua = req.headers["user-agent"] || "";
 
-  const { messages, tools, supportedIds, thinkingLevel } = claudeToCursor(body);
   const model = mapModel(body.model);
   const inputText = inputTextOf(body);
   const strategy = ((await settings.get("scheduler")) || {}).strategy;
   const gateway = { ...GATEWAY_DEFAULTS, ...((await settings.get("gateway")) || {}) };
 
+  // Tool calling: Cursor's backend never exposes client-declared tools to the
+  // model (verified: they're dropped, and the model calls a native tool that
+  // leaks to the client). So when the request carries tools we SIMULATE function
+  // calling via prompt engineering — describe the tools, run Cursor in plain Chat
+  // mode (no native tools injected), and parse the model's marker output back
+  // into Anthropic tool_use. "native" keeps the legacy native-mapping behavior.
+  const hasTools = Array.isArray(body.tools) && body.tools.length > 0;
+  const toolMode = gateway.toolMode || "simulate";
+  const simulate = hasTools && toolMode !== "native";
+
+  const { messages, tools, supportedIds, thinkingLevel } = claudeToCursor(body, { simulate });
+
   // Cursor conversation mode. Default "agent" so the model actually calls tools;
   // otherwise a plain prompt (no tools) lands in Ask mode and Cursor refuses to
   // write files / run commands. "auto" keeps the old UA-sniffing behavior.
+  // Simulation MUST run in AGENT mode: in Ask mode Cursor's own system prompt
+  // makes the model refuse "write" tools ("switch to agent mode"). In Agent mode
+  // — with NO native tool ids enabled (supportedIds=[]) and our marker
+  // instructions — the model emits our tool-call markers and does NOT touch
+  // Cursor's native tools (verified live).
   const cursorMode = gateway.cursorMode || "agent";
-  const forceAgentMode =
-    cursorMode === "agent" ? true
+  const forceAgentMode = simulate
+    ? true
+    : cursorMode === "agent" ? true
     : cursorMode === "ask" ? false
     : /claude-cli|claude-code/i.test(ua);
 
+  // Tool simulation can't stream (a marker block must be parsed whole), so buffer.
+  const buffered = !stream || simulate;
+
   const startedAt = Date.now();
-  log(`→ model=${body.model || "?"}→${model} mode=${cursorMode} stream=${stream} tools=${(tools || []).length}`);
+  log(`→ model=${body.model || "?"}→${model} mode=${simulate ? "simulate" : cursorMode} stream=${stream} tools=${(body.tools || []).length}`);
 
   const exclude = new Set();
   let lastError = null;
@@ -112,7 +133,7 @@ router.post("/v1/messages", requireApiKey, async (req, res) => {
     const creds = { accessToken: acc.access_token, machineId: acc.machine_id, ghostMode: !!acc.ghost_mode, proxyUrl };
     const reqArgs = { messages, model, tools, supportedIds, thinkingLevel, forceAgentMode };
 
-    if (stream) {
+    if (!buffered) {
       // True streaming. Fail over is only possible before the first byte is sent
       // to the client; the generator's first event tells us if it's retryable.
       const gen = streamCursor(reqArgs, creds);
@@ -183,7 +204,29 @@ router.post("/v1/messages", requireApiKey, async (req, res) => {
       return anthropicError(res, httpFor(decoded.status), "invalid_request_error", decoded.error);
     }
 
+    // Tool simulation: parse the model's marker output into real tool_use calls
+    // (correct client tool names + structured input), strip markers from text.
+    if (simulate) {
+      const parsed = parseToolMarkers(decoded.text || "");
+      decoded.text = parsed.text;
+      decoded.toolCalls = parsed.toolCalls.map((tc) => ({
+        id: tc.id, type: "function", function: { name: tc.name, arguments: JSON.stringify(tc.input) },
+      }));
+    }
+
     await succeed(acc);
+    if (stream) {
+      // Buffered-but-client-wanted-stream (tool simulation): emit the whole
+      // Anthropic SSE sequence at once from the decoded result.
+      res.writeHead(200, {
+        "content-type": "text/event-stream",
+        "cache-control": "no-cache",
+        connection: "keep-alive",
+        "x-cursor-account": acc.id,
+      });
+      res.write(buildAnthropicSSE(decoded, body.model, inputText));
+      return res.end();
+    }
     res.setHeader("x-cursor-account", acc.id);
     return res.json(buildAnthropicMessage(decoded, body.model, inputText, { emitThinking: gateway.emitThinking }));
   }

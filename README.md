@@ -136,12 +136,23 @@ Cursor 的 `telemetry.machineId` / `macMachineId` 都是 **64 位 hex**，`devDe
 ## 离线自检
 
 ```bash
-npm run smoke      # 编解码/翻译/checksum round-trip，无网络
+npm run smoke        # 编解码/翻译/checksum round-trip，无网络
+npm run smoke:tools  # 工具调用模拟：系统提示/标记解析/编码，无网络
 ```
 
-## 工具适配（实验性）
+## 工具调用（默认：提示工程模拟）
 
-Cursor 不接受自定义工具声明，只给原生 palette。`gateway/toolAdapter.js` 在 Read/Bash/LS/Glob/Grep/WebSearch 上做 native↔Claude Code 名字+参数+结果映射；`edit_file`/`Write` 因 diff 格式差异为 best-effort。详见 `TESTING.md`。
+**实测结论**：Cursor 后端**不会**把客户端声明的工具（无论自定义函数工具还是 Anthropic 类型工具如 `str_replace_based_edit_tool`/`memory`）暴露给模型——它们被丢弃，模型只会看到 Cursor 自己的原生工具（`read_file`/`web_search`/`ask_question`…），于是要么回「没有该工具」，要么调用一个原生工具并把它泄漏给客户端。
+
+由于在 Anthropic API 里**工具由客户端执行**（网关不需要 Cursor 真正跑工具），默认采用**提示工程模拟**（设置页 → 响应行为 → 工具调用处理 = `simulate`）：
+
+- 把客户端声明的工具（含 `input_schema` 与 Anthropic 类型工具）写进系统提示；
+- 在 **Agent 模式**下运行（Ask 模式会被 Cursor 自带系统提示拦成只读而拒绝），但**不下发任何原生工具 id**，并指示模型「你只是输出工具调用标记，由外部系统执行」——模型于是输出标记块而不碰原生工具；
+- 解析标记 → 还原成带**客户端原始工具名**与结构化 `input` 的 Anthropic `tool_use`（多轮 tool loop 保真，已实测：单次调用 / `tool_result` 回传后续轮均正常）。
+
+`toolMode=native`（遗留）则只把少数 Claude Code 工具映射到 Cursor 原生工具（有损，自定义/类型工具会失败），见 `gateway/toolAdapter.js`。
+
+> 注：带 `tools` 的请求会缓冲整轮后再解析标记（标记块无法逐字流式），因此即使客户端要求 `stream:true`，工具请求也是一次性返回完整 SSE 序列。
 
 ## 协议版本治理
 

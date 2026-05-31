@@ -227,6 +227,14 @@ export const DEFAULT_ACCOUNT_ERROR_KEYWORDS = [
 ];
 
 export const GATEWAY_DEFAULTS = {
+  // How to handle client-declared tools. Cursor's backend does NOT expose them
+  // to the model, so:
+  //   "simulate" (default) — describe tools in the prompt + parse marker output
+  //                           back into tool_use. Works for ANY tool (function
+  //                           tools and Anthropic typed tools). Runs in Chat mode.
+  //   "native"             — legacy: map the handful of Claude Code tools onto
+  //                           Cursor's native palette (lossy; custom tools fail).
+  toolMode: "simulate",
   // Emit Cursor's `thinking` as Anthropic thinking blocks. OFF by default because
   // these blocks carry no Anthropic signature and some clients reject them.
   emitThinking: false,
